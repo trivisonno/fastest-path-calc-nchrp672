@@ -1,0 +1,10 @@
+{
+  "name": "Main St @ 1st Ave - NB approach",
+  "units": "us",
+  "r1": 92,
+  "r2": 98,
+  "r3": 150,
+  "r4": 55,
+  "r5": 70,
+  "exit_distance": 140
+}

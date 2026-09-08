@@ -1,0 +1,4 @@
+[
+  { "name": "NB approach", "units": "us", "r1": 130, "r2": 95, "r3": 160, "r4": 90, "r5": 78 },
+  { "name": "EB approach", "units": "us", "r1": 155, "r2": 95, "r3": 150, "r4": 92, "r5": 85 }
+]

@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fastest-Path Turn Speed Map</title>
+<link
+  rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+/>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --panel: #ffffff;
+    --ink: #1c1c1c;
+    --muted: #6b6b6b;
+    --line: #e2e2dc;
+    --enter: #1d6fe0;
+    --exit: #e07a1d;
+    --accent: #128a5b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    display: flex;
+  }
+  #sidebar {
+    width: 360px;
+    min-width: 360px;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 16px 16px 40px;
+  }
+  #map { flex: 1; height: 100vh; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 22px 0 8px; border-bottom: 1px solid var(--line);
+    padding-bottom: 4px;
+  }
+  p.sub { color: var(--muted); margin: 0 0 12px; font-size: 12px; }
+  button {
+    font: inherit; padding: 6px 10px; border: 1px solid var(--line);
+    background: #fafaf8; border-radius: 6px; cursor: pointer;
+  }
+  button:hover { background: #f0f0ec; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.armed { background: var(--enter); color: #fff; border-color: var(--enter); }
+  button.armed.exit { background: var(--exit); border-color: var(--exit); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .row + .row { margin-top: 6px; }
+  label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
+  select, input[type="number"], textarea {
+    font: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px;
+    background: #fff; width: 100%;
+  }
+  textarea { min-height: 84px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+    background: #f0f0ec; border-radius: 999px; font-size: 12px; margin: 2px 4px 2px 0;
+  }
+  .chip button { border: none; background: none; padding: 0 2px; cursor: pointer; color: var(--muted); }
+  .chip input[type="color"] {
+    width: 20px; height: 16px; padding: 0; border: 1px solid var(--line);
+    border-radius: 3px; background: none; cursor: pointer; vertical-align: middle;
+  }
+  .chip input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  .chip input[type="color"]::-webkit-color-swatch { border: none; border-radius: 2px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .status { font-size: 12px; color: var(--muted); margin-top: 8px; white-space: pre-line; }
+  .arrowhead {
+    width: 0; height: 0;
+    border-left: 17px solid currentColor;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+    filter: drop-shadow(0 0 1px rgba(0, 0, 0, .7));
+  }
+  .leaflet-tooltip.map-label,
+  .leaflet-tooltip.pt-label {
+    background: #fff; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+    padding: 2px 6px; white-space: nowrap; text-align: center;
+    font: 11px/1.25 ui-monospace, Menlo, Consolas, monospace;
+  }
+  .leaflet-tooltip.pt-label { font-weight: 700; padding: 0 4px; letter-spacing: .02em; }
+  .leaflet-tooltip.map-label::before,
+  .leaflet-tooltip.pt-label::before { display: none !important; border: none !important; }
+  .note { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .err { color: #b3261e; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <h1>Fastest-Path Turn Speed Map</h1>
+  <p class="sub">
+    Define the entering and exiting paths of a turning vehicle, then predict the
+    fastest-path speed for one or more turn radii (NCHRP 672 / NCHRP 1043).
+  </p>
+
+  <h2>1 &middot; Vehicle paths</h2>
+  <div class="row">
+    <button id="drawEnter">Draw entering path</button>
+    <button id="drawExit">Draw exiting path</button>
+  </div>
+  <div class="row">
+    <button id="clearPaths">Clear paths</button>
+    <button id="exampleBtn">Load example</button>
+  </div>
+  <p class="note">
+    <span class="swatch" style="background:var(--enter)"></span> entering &nbsp;
+    <span class="swatch" style="background:var(--exit)"></span> exiting &mdash;
+    click two points per path; drag the endpoints to adjust.
+  </p>
+  <div id="pathStatus" class="status"></div>
+
+  <h2>2 &middot; GeoJSON &amp; project file</h2>
+  <div class="row">
+    <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" />
+  </div>
+  <label class="field" for="geojsonText">FeatureCollection with the two 2-point LineStrings
+    (<code>role: "entering" | "exiting"</code>, else order is used). Export also embeds
+    the radii, colors and calc/style settings under <code>fastest_path</code>, and
+    import restores them:</label>
+  <textarea id="geojsonText" spellcheck="false" placeholder='{"type":"FeatureCollection","fastest_path":{ ... },"features":[ ... ]}'></textarea>
+  <div class="row">
+    <button id="loadGeojson">Import</button>
+    <button id="exportGeojson">Export (paths + radii + settings)</button>
+  </div>
+  <div id="geojsonMsg" class="note"></div>
+
+  <h2>3 &middot; Speed parameters</h2>
+  <label class="field" for="units">Units</label>
+  <select id="units">
+    <option value="us" selected>US customary &mdash; radius ft, speed mph</option>
+    <option value="si">Metric &mdash; radius m, speed km/h</option>
+  </select>
+  <label class="field" for="method">Speed equation</label>
+  <select id="method">
+    <option value="auto" selected>auto &mdash; regression &le; limit, else point-mass</option>
+    <option value="regression">regression &mdash; NCHRP 1043 Eq. 9.3 / 9.4</option>
+    <option value="point-mass">point-mass &mdash; NCHRP 672 Eq. 6-1 (Green Book)</option>
+  </select>
+  <p class="note">Speeds are reported for both +2% and &minus;2% superelevation.</p>
+
+  <h2>4 &middot; Turn radii</h2>
+  <div class="row">
+    <input type="number" id="radiusInput" min="1" step="1" placeholder="radius" style="max-width:120px" />
+    <button id="addRadius">Add radius</button>
+  </div>
+  <div id="radiusChips" style="margin-top:8px"></div>
+  <div class="row" style="margin-top:10px">
+    <label><input type="checkbox" id="showArcs" checked /> Show turn-radius curves</label>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label><input type="checkbox" id="showVehiclePath" checked /> Show vehicle-path lines</label>
+  </div>
+  <div class="row" style="margin-top:4px">
+    <span class="note">offset</span>
+    <input type="number" id="vehicleOffset" value="3" min="0.5" step="0.5" style="max-width:76px" />
+    <span class="note" id="offsetUnit">ft each side of the path</span>
+  </div>
+  <p class="note">Vehicle-path lines are the centerline offset both ways (half the
+    vehicle width; NCHRP 672 draws the fastest path for a 6&nbsp;ft / 2&nbsp;m vehicle).</p>
+
+  <h2>5 &middot; Predicted fastest-path speeds</h2>
+  <div id="results"></div>
+  <p class="note" id="geomNote"></p>
+
+  <h2>6 &middot; Circular curve geometry</h2>
+  <div id="curveGeom"></div>
+</div>
+<div id="map"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ------------------------------------------------------------------ *
+ *  Speed-prediction equations  (port of fastestpath/equations.py)
+ * ------------------------------------------------------------------ */
+const REGRESSION = {
+  us: { pos: [3.4415, 0.3861], neg: [3.4614, 0.3673] }, // R ft  -> V mph
+  si: { pos: [8.7602, 0.3861], neg: [8.6169, 0.3673] }, // R m   -> V km/h
+};
+const REGRESSION_MAX_R = { us: 400.0, si: 120.0 };
+const POINT_MASS_K = { us: 15.0, si: 127.0 };
+const SIDE_FRICTION = {
+  us: [[15,0.32],[20,0.27],[25,0.23],[30,0.20],[35,0.18],[40,0.16]],
+  si: [[20,0.35],[30,0.28],[40,0.23],[50,0.19],[60,0.17]],
+};
+
+function interp(table, x) {
+  if (x <= table[0][0]) return table[0][1];
+  if (x >= table[table.length - 1][0]) return table[table.length - 1][1];
+  for (let i = 0; i < table.length - 1; i++) {
+    const [x0, y0] = table[i], [x1, y1] = table[i + 1];
+    if (x >= x0 && x <= x1) return y0 + (x - x0) / (x1 - x0) * (y1 - y0);
+  }
+  return table[table.length - 1][1];
+}
+function sideFriction(speed, units) { return interp(SIDE_FRICTION[units], speed); }
+
+function pointMassSpeed(radius, superelevation, units) {
+  const k = POINT_MASS_K[units];
+  let v = units === "us" ? 20 : 30;
+  for (let i = 0; i < 100; i++) {
+    const f = sideFriction(v, units);
+    const next = Math.sqrt(Math.max(k * radius * (superelevation + f), 0));
+    if (Math.abs(next - v) < 1e-6) { v = next; break; }
+    v = next;
+  }
+  return v;
+}
+// superelevation: number (decimal) or "+"/"-"
+function predictSpeed(radius, superelevation, units, method) {
+  if (!(radius > 0)) return NaN;
+  let e = typeof superelevation === "number"
+    ? superelevation : (superelevation === "-" ? -0.02 : 0.02);
+  let m = method;
+  if (m === "auto") m = radius <= REGRESSION_MAX_R[units] ? "regression" : "point-mass";
+  if (m === "point-mass") return pointMassSpeed(radius, e, units);
+  const [a, b] = REGRESSION[units][e >= 0 ? "pos" : "neg"];
+  return a * Math.pow(radius, b);
+}
+function methodUsed(radius, units, method) {
+  if (method !== "auto") return method;
+  return radius <= REGRESSION_MAX_R[units] ? "regression" : "point-mass";
+}
+
+/* ------------------------------------------------------------------ *
+ *  Local planar frame  (equirectangular tangent plane, metre units)
+ * ------------------------------------------------------------------ */
+const R_EARTH = 6378137;
+function planarFns(originLatLng) {
+  const latRad = originLatLng.lat * Math.PI / 180;
+  const mPerLng = Math.PI / 180 * R_EARTH * Math.cos(latRad);
+  const mPerLat = Math.PI / 180 * R_EARTH;
+  return {
+    toXY: (ll) => ({
+      x: (ll.lng - originLatLng.lng) * mPerLng,
+      y: (ll.lat - originLatLng.lat) * mPerLat,
+    }),
+    toLatLng: (p) => L.latLng(
+      originLatLng.lat + p.y / mPerLat,
+      originLatLng.lng + p.x / mPerLng,
+    ),
+  };
+}
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+const add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+const scale = (a, s) => ({ x: a.x * s, y: a.y * s });
+const dot = (a, b) => a.x * b.x + a.y * b.y;
+const cross = (a, b) => a.x * b.y - a.y * b.x;
+const norm = (a) => Math.hypot(a.x, a.y);
+const unit = (a) => { const n = norm(a) || 1; return { x: a.x / n, y: a.y / n }; };
+
+const FT_PER_M = 3.280839895;
+
+/* ------------------------------------------------------------------ *
+ *  Map + state
+ * ------------------------------------------------------------------ */
+const map = L.map("map", { zoomControl: true }).setView([41.4993, -81.6944], 18);
+const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 23, maxNativeZoom: 19, attribution: "&copy; OpenStreetMap contributors",
+});
+const sat = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { maxZoom: 23, maxNativeZoom: 19, attribution: "Imagery &copy; Esri" }
+);
+// Cuyahoga County cached aerial: standard Web-Mercator XYZ scheme (/tile/{z}/{y}/{x}),
+// cached LOD levels 10-21, so no zoomOffset; overzoom past 21 up to 23.
+const cuyahoga = L.tileLayer(
+  "https://gis.cuyahogacounty.gov/server/rest/services/IMAGERY/2026_Spring_Aerial/MapServer/tile/{z}/{y}/{x}",
+  {
+    minNativeZoom: 10, maxNativeZoom: 21, maxZoom: 23,
+    attribution: '<a href="https://geospatial.gis.cuyahogacounty.gov/" target="_blank" rel="noopener">Cuyahoga County GIS</a>',
+  }
+).addTo(map);
+L.control.layers({
+  "Aerial 2026 Spring (Cuyahoga Co.)": cuyahoga,
+  "Satellite (Esri)": sat,
+  "OpenStreetMap": osm,
+}).addTo(map);
+
+const state = {
+  entering: [],          // [L.latLng, L.latLng]
+  exiting: [],           // [L.latLng, L.latLng]
+  radii: [],             // [{ id, value, color, visible }] value in display units
+  drawing: null,         // "entering" | "exiting" | null
+};
+let radiusSeq = 0;
+
+const layers = {
+  paths: L.layerGroup().addTo(map),
+  handles: L.layerGroup().addTo(map),
+  arrows: L.layerGroup().addTo(map),
+  envelopes: L.layerGroup().addTo(map),
+  arcs: L.layerGroup().addTo(map),
+};
+
+const ARC_COLORS = ["#128a5b", "#8a4d12", "#5b12a8", "#0a7f8c", "#a81243", "#5c6b12"];
+function pickColor() {
+  const used = new Set(state.radii.map((r) => r.color));
+  return ARC_COLORS.find((c) => !used.has(c)) || ARC_COLORS[radiusSeq % ARC_COLORS.length];
+}
+function addRadiusValue(v) {
+  state.radii.push({ id: ++radiusSeq, value: v, color: pickColor(), visible: true });
+  state.radii.sort((a, b) => a.value - b.value);
+}
+
+/* ---------- drawing paths ---------- */
+function armDraw(which) {
+  state.drawing = state.drawing === which ? null : which;
+  if (state.drawing) state[which] = [];
+  refreshButtons();
+  render();
+}
+function refreshButtons() {
+  const de = document.getElementById("drawEnter");
+  const dx = document.getElementById("drawExit");
+  de.className = state.drawing === "entering" ? "armed" : "";
+  dx.className = state.drawing === "exiting" ? "armed exit" : "";
+  de.textContent = state.drawing === "entering" ? "Click start & end…" : "Draw entering path";
+  dx.textContent = state.drawing === "exiting" ? "Click start & end…" : "Draw exiting path";
+}
+map.on("click", (e) => {
+  if (!state.drawing) return;
+  const arr = state[state.drawing];
+  arr.push(e.latlng);
+  if (arr.length >= 2) { state[state.drawing] = arr.slice(0, 2); state.drawing = null; }
+  refreshButtons();
+  render();
+});
+
+document.getElementById("drawEnter").onclick = () => armDraw("entering");
+document.getElementById("drawExit").onclick = () => armDraw("exiting");
+document.getElementById("clearPaths").onclick = () => {
+  state.entering = []; state.exiting = []; state.drawing = null;
+  refreshButtons(); render();
+};
+document.getElementById("exampleBtn").onclick = () => {
+  // A ~90 degree right turn at a typical urban intersection.
+  state.entering = [L.latLng(41.49900, -81.69445), L.latLng(41.49925, -81.69445)];
+  state.exiting  = [L.latLng(41.49930, -81.69438), L.latLng(41.49930, -81.69370)];
+  if (!state.radii.length) [50, 75, 100].forEach(addRadiusValue);
+  map.fitBounds(L.latLngBounds([...state.entering, ...state.exiting]).pad(0.6));
+  renderChips(); render();
+};
+
+/* ---------- radii ---------- */
+document.getElementById("addRadius").onclick = () => {
+  const inp = document.getElementById("radiusInput");
+  const v = parseFloat(inp.value);
+  if (v > 0) { addRadiusValue(v); inp.value = ""; }
+  renderChips(); render();
+};
+document.getElementById("radiusInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("addRadius").click();
+});
+function renderChips() {
+  const box = document.getElementById("radiusChips");
+  const u = unitLabels();
+  box.innerHTML = "";
+  if (!state.radii.length) { box.innerHTML = '<span class="note">No radii yet.</span>'; return; }
+  state.radii.forEach((r) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.style.opacity = r.visible ? "1" : "0.5";
+    chip.innerHTML =
+      `<input type="color" value="${r.color}" title="curve color" />`
+      + `<label title="show / hide this curve"><input type="checkbox" ${r.visible ? "checked" : ""}/> </label>`
+      + `${r.value} ${u.len} <button title="remove">&times;</button>`;
+    chip.querySelector('input[type="color"]').oninput = (e) => {
+      r.color = e.target.value; renderGeom();   // no renderChips: keeps the picker open
+    };
+    chip.querySelector('input[type="checkbox"]').onchange = (e) => {
+      r.visible = e.target.checked; renderChips(); renderGeom();
+    };
+    chip.querySelector("button").onclick = () => {
+      state.radii = state.radii.filter((x) => x.id !== r.id);
+      renderChips(); renderGeom();
+    };
+    box.appendChild(chip);
+  });
+}
+
+/* ---------- parameter changes ---------- */
+["units", "method"].forEach((id) =>
+  document.getElementById(id).addEventListener("change", () => { renderChips(); render(); }));
+["showArcs", "showVehiclePath"].forEach((id) =>
+  document.getElementById(id).addEventListener("change", renderGeom));
+document.getElementById("vehicleOffset").addEventListener("input", renderGeom);
+document.getElementById("units").addEventListener("change", () => {
+  const off = document.getElementById("vehicleOffset");
+  document.getElementById("offsetUnit").textContent =
+    document.getElementById("units").value === "us" ? "ft each side of the path" : "m each side of the path";
+  const v = parseFloat(off.value);
+  if (document.getElementById("units").value === "si" && v === 3) off.value = "1";
+  if (document.getElementById("units").value === "us" && v === 1) off.value = "3";
+});
+
+function unitLabels() {
+  return document.getElementById("units").value === "us"
+    ? { len: "ft", spd: "mph" } : { len: "m", spd: "km/h" };
+}
+
+/* ------------------------------------------------------------------ *
+ *  Geometry: intersection of the two path tangents + fitted arc
+ * ------------------------------------------------------------------ */
+function turnGeometry() {
+  if (state.entering.length < 2 || state.exiting.length < 2) return null;
+  const origin = state.entering[0];
+  const P = planarFns(origin);
+  const e0 = P.toXY(state.entering[0]), e1 = P.toXY(state.entering[1]);
+  const x0 = P.toXY(state.exiting[0]),  x1 = P.toXY(state.exiting[1]);
+  const d1 = unit(sub(e1, e0));   // entering direction of travel
+  const d2 = unit(sub(x1, x0));   // exiting direction of travel
+  const cr = cross(d1, d2);
+  const deflection = Math.atan2(cr, dot(d1, d2)); // signed, radians
+  const turnDir = cr > 1e-9 ? "left" : cr < -1e-9 ? "right" : "through";
+
+  let PI = null;
+  if (Math.abs(cr) > 1e-6) {
+    // solve e1 + t*d1 = x0 + s*d2
+    const rhs = sub(x0, e1);
+    const den = d1.x * (-d2.y) - (-d2.x) * d1.y;
+    const t = (rhs.x * (-d2.y) - (-d2.x) * rhs.y) / den;
+    PI = add(e1, scale(d1, t));
+  }
+  return { origin, P, e0, e1, x0, x1, d1, d2, deflection, turnDir, PI };
+}
+
+function fittedArc(geom, radiusMeters) {
+  if (!geom || !geom.PI || Math.abs(geom.deflection) < 1e-4) return null;
+  const { d1, d2, PI, deflection } = geom;
+  const delta = Math.abs(deflection);                   // central angle, rad
+  const half = delta / 2;
+  const T = radiusMeters * Math.tan(half);              // tangent distance
+  const Lc = radiusMeters * delta;                      // length of curve
+  const LC = 2 * radiusMeters * Math.sin(half);         // long chord
+  const M = radiusMeters * (1 - Math.cos(half));        // middle ordinate
+  const E = radiusMeters * (1 / Math.cos(half) - 1);    // external distance
+  const BC = add(PI, scale(d1, -T));                    // begin curve (PC)
+  const EC = add(PI, scale(d2,  T));                    // end curve (PT)
+  // centre is offset perpendicular to d1 toward the inside of the turn
+  const left = deflection > 0;
+  const n = left ? { x: -d1.y, y: d1.x } : { x: d1.y, y: -d1.x };
+  const C = add(BC, scale(n, radiusMeters));
+  const a0 = Math.atan2(BC.y - C.y, BC.x - C.x);
+  const a1 = Math.atan2(EC.y - C.y, EC.x - C.x);
+  let sweep = a1 - a0;
+  while (sweep <= -Math.PI) sweep += 2 * Math.PI;
+  while (sweep > Math.PI) sweep -= 2 * Math.PI;
+  const N = 48, pts = [];
+  for (let i = 0; i <= N; i++) {
+    const a = a0 + sweep * (i / N);
+    pts.push({ x: C.x + radiusMeters * Math.cos(a), y: C.y + radiusMeters * Math.sin(a) });
+  }
+  const mid = pts[Math.floor(N / 2)];
+  return {
+    BC, EC, C, PI, pts, mid,
+    T, L: Lc, LC, M, E, deltaDeg: delta * 180 / Math.PI,
+  };
+}
+
+// Miter-offset a polyline (planar XY). Positive dist = left of travel direction.
+function offsetPolyline(pts, dist) {
+  const n = pts.length;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let dir;
+    if (i === 0) dir = unit(sub(pts[1], pts[0]));
+    else if (i === n - 1) dir = unit(sub(pts[n - 1], pts[n - 2]));
+    else dir = unit(add(unit(sub(pts[i], pts[i - 1])), unit(sub(pts[i + 1], pts[i]))));
+    const nrm = { x: -dir.y, y: dir.x };
+    let k = 1;
+    if (i > 0 && i < n - 1) {
+      const dIn = unit(sub(pts[i], pts[i - 1]));
+      const c = dot(nrm, { x: -dIn.y, y: dIn.x });
+      if (Math.abs(c) > 0.25) k = 1 / c;
+      k = Math.max(-3, Math.min(3, k));
+    }
+    out.push(add(pts[i], scale(nrm, dist * k)));
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Rendering
+ * ------------------------------------------------------------------ */
+
+// Full redraw (structure changed): rebuild draggable handles too.
+function render() {
+  renderHandles();
+  renderGeom();
+}
+
+// Rebuild only the draggable endpoint handles.
+function renderHandles() {
+  layers.handles.clearLayers();
+  drawHandles(state.entering, "#1d6fe0");
+  drawHandles(state.exiting, "#e07a1d");
+}
+
+// Redraw path lines, arrows, arcs and the read-outs. Safe to call mid-drag
+// (does not touch layers.handles, so the marker being dragged survives).
+function renderGeom() {
+  layers.paths.clearLayers();
+  layers.arrows.clearLayers();
+  layers.arcs.clearLayers();
+  layers.envelopes.clearLayers();
+
+  if (state.entering.length === 2)
+    L.polyline(state.entering, { color: "#1d6fe0", weight: 5, opacity: 0.85 }).addTo(layers.paths);
+  if (state.exiting.length === 2)
+    L.polyline(state.exiting, { color: "#e07a1d", weight: 5, opacity: 0.85 }).addTo(layers.paths);
+
+  const geom = turnGeometry();
+  const u = unitLabels();
+  const unitsVal = document.getElementById("units").value;
+  const methodVal = document.getElementById("method").value;
+  const toM = unitsVal === "us" ? (ft) => ft / FT_PER_M : (m) => m;
+  const showArcs = document.getElementById("showArcs").checked;
+  const showVeh = document.getElementById("showVehiclePath").checked;
+  const offM = toM(Math.abs(parseFloat(document.getElementById("vehicleOffset").value) || 0));
+
+  const dot = (xy, color, weight) =>
+    L.circleMarker(geom.P.toLatLng(xy),
+      { radius: 3.5, color, weight: weight || 2, fillColor: "#fff", fillOpacity: 1 });
+  const label = (xy, text, cls, direction, offset) =>
+    L.tooltip({ permanent: true, direction, offset: offset || [0, 0], className: cls, opacity: 1 })
+      .setLatLng(geom.P.toLatLng(xy)).setContent(text);
+
+  if (geom && geom.PI) {
+    // tangent lines extended to the point of intersection
+    L.polyline([state.entering[1], geom.P.toLatLng(geom.PI)],
+      { color: "#777", weight: 1.5, dashArray: "3 4", opacity: 0.85 }).addTo(layers.arcs);
+    L.polyline([geom.P.toLatLng(geom.PI), state.exiting[0]],
+      { color: "#777", weight: 1.5, dashArray: "3 4", opacity: 0.85 }).addTo(layers.arcs);
+    dot(geom.PI, "#555").addTo(layers.arcs);
+    label(geom.PI, "PI", "pt-label", "top", [0, -4]).addTo(layers.arcs);
+  }
+
+  if (geom) {
+    state.radii.forEach((r) => {
+      if (!r.visible) return;
+      const arc = fittedArc(geom, toM(r.value));
+      if (!arc) return;
+      const color = r.color;
+
+      if (showVeh && offM > 0) {
+        const center = [geom.e0, ...arc.pts, geom.x1];
+        [offM, -offM].forEach((d) => {
+          L.polyline(offsetPolyline(center, d).map(geom.P.toLatLng),
+            { color, weight: 2, opacity: 0.75, dashArray: "4 5" }).addTo(layers.envelopes);
+        });
+      }
+
+      if (showArcs) {
+        L.polyline(arc.pts.map(geom.P.toLatLng), { color, weight: 4, opacity: 0.9 }).addTo(layers.arcs);
+        dot(arc.BC, color).addTo(layers.arcs);
+        dot(arc.EC, color).addTo(layers.arcs);
+        label(arc.BC, "PC", "pt-label", "left", [-6, 0]).addTo(layers.arcs);
+        label(arc.EC, "PT", "pt-label", "right", [6, 0]).addTo(layers.arcs);
+        const vpos = predictSpeed(r.value, "+", unitsVal, methodVal);
+        const rTick = unitsVal === "us" ? "&#39;" : "&nbsp;m";
+        label(arc.mid, `R=${r.value}${rTick}<br>V=${vpos.toFixed(1)} ${u.spd}`,
+          "map-label", "center").addTo(layers.arcs);
+      }
+    });
+  }
+
+  renderArrows();
+  renderPathStatus(geom);
+  renderResults(geom);
+  renderCurveGeom(geom);
+}
+
+function drawHandles(pts, hexColor) {
+  pts.forEach((ll, idx) => {
+    const m = L.marker(ll, {
+      draggable: true,
+      icon: L.divIcon({
+        className: "",
+        html: `<div style="width:12px;height:12px;border-radius:50%;background:#fff;`
+            + `border:3px solid ${hexColor};box-sizing:border-box"></div>`,
+        iconSize: [12, 12], iconAnchor: [6, 6],
+      }),
+    }).addTo(layers.handles);
+    m.on("drag", (ev) => { pts[idx] = ev.target.getLatLng(); renderGeom(); });
+    m.on("dragend", render);
+  });
+}
+
+function renderArrows() {
+  [["entering", state.entering, "#1d6fe0"], ["exiting", state.exiting, "#e07a1d"]].forEach(
+    ([_, pts, color]) => {
+      if (pts.length < 2) return;
+      const a = map.latLngToContainerPoint(pts[0]);
+      const b = map.latLngToContainerPoint(pts[1]);
+      const ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+      [0.45, 0.9].forEach((frac) => {
+        const ll = L.latLng(
+          pts[0].lat + (pts[1].lat - pts[0].lat) * frac,
+          pts[0].lng + (pts[1].lng - pts[0].lng) * frac,
+        );
+        L.marker(ll, {
+          interactive: false,
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="arrowhead" style="color:${color};transform:rotate(${ang}deg)"></div>`,
+            iconSize: [17, 16], iconAnchor: [9, 8],
+          }),
+        }).addTo(layers.arrows);
+      });
+    }
+  );
+}
+map.on("zoomend moveend", renderArrows);
+
+function fmtLatLng(ll) { return `${ll.lat.toFixed(6)}, ${ll.lng.toFixed(6)}`; }
+
+function renderPathStatus(geom) {
+  const el = document.getElementById("pathStatus");
+  const lines = [];
+  lines.push(`Entering: ${state.entering.length === 2 ? state.entering.map(fmtLatLng).join("  →  ") : "—"}`);
+  lines.push(`Exiting:  ${state.exiting.length === 2 ? state.exiting.map(fmtLatLng).join("  →  ") : "—"}`);
+  if (geom) {
+    const deg = Math.abs(geom.deflection * 180 / Math.PI);
+    lines.push(`Deflection angle: ${deg.toFixed(1)}°  (${geom.turnDir} turn)`);
+    if (!geom.PI) lines.push("Paths are parallel — no turn geometry.");
+  }
+  el.textContent = lines.join("\n");
+}
+
+function renderResults(geom) {
+  const box = document.getElementById("results");
+  const note = document.getElementById("geomNote");
+  const units = document.getElementById("units").value;
+  const method = document.getElementById("method").value;
+  const u = unitLabels();
+  if (!state.radii.length) { box.innerHTML = '<p class="note">Add one or more turn radii above.</p>'; note.textContent = ""; return; }
+
+  let rows = "";
+  state.radii.forEach((rObj) => {
+    const r = rObj.value;
+    const vpos = predictSpeed(r, "+", units, method);
+    const vneg = predictSpeed(r, "-", units, method);
+    const dim = rObj.visible ? "" : ' style="opacity:.5"';
+    rows += `<tr${dim}><td><span class="swatch" style="background:${rObj.color}"></span> ${r}</td>`
+          + `<td>${vpos.toFixed(1)}</td><td>${vneg.toFixed(1)}</td>`
+          + `<td>${methodUsed(r, units, method)}</td></tr>`;
+  });
+  box.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>R (${u.len})</th><th>+2%<br>(${u.spd})</th><th>&minus;2%<br>(${u.spd})</th><th>eqn</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  note.textContent = "";
+}
+
+// Standard circular-curve elements for each visible radius (PC-PI-PT curve
+// defined by the two path tangents and R).
+function renderCurveGeom(geom) {
+  const box = document.getElementById("curveGeom");
+  if (!geom) { box.innerHTML = '<p class="note">Draw both vehicle paths to compute curve geometry.</p>'; return; }
+  if (!geom.PI) { box.innerHTML = '<p class="note">Paths are parallel — no point of intersection / curve.</p>'; return; }
+
+  const units = document.getElementById("units").value;
+  const u = unitLabels();
+  const toDisp = units === "us" ? (m) => m * FT_PER_M : (m) => m;
+  const deltaDeg = Math.abs(geom.deflection * 180 / Math.PI);
+  const piLL = geom.P.toLatLng(geom.PI);
+
+  let html =
+    `<p class="note">&Delta; (deflection / central angle) = <b>${deltaDeg.toFixed(2)}&deg;</b>`
+    + ` &nbsp;&middot;&nbsp; ${geom.turnDir} turn<br>`
+    + `PI = <code>${fmtLatLng(piLL)}</code></p>`;
+
+  const vis = state.radii.filter((r) => r.visible);
+  if (!vis.length) { box.innerHTML = html + '<p class="note">No visible radii.</p>'; return; }
+
+  let rows = "", pcpt = "";
+  vis.forEach((rObj) => {
+    const arc = fittedArc(geom, units === "us" ? rObj.value / FT_PER_M : rObj.value);
+    if (!arc) return;
+    const D = units === "us" ? (5729.5779513 / rObj.value) : null; // degree of curve, arc def.
+    rows +=
+      `<tr><td><span class="swatch" style="background:${rObj.color}"></span> ${rObj.value}</td>`
+      + `<td>${toDisp(arc.T).toFixed(1)}</td><td>${toDisp(arc.L).toFixed(1)}</td>`
+      + `<td>${toDisp(arc.LC).toFixed(1)}</td><td>${toDisp(arc.M).toFixed(1)}</td>`
+      + `<td>${toDisp(arc.E).toFixed(1)}</td><td>${D === null ? "&mdash;" : D.toFixed(2)}</td></tr>`;
+    pcpt +=
+      `<div><span class="swatch" style="background:${rObj.color}"></span> R ${rObj.value} ${u.len}`
+      + ` &mdash; PC <code>${fmtLatLng(geom.P.toLatLng(arc.BC))}</code>`
+      + ` &nbsp; PT <code>${fmtLatLng(geom.P.toLatLng(arc.EC))}</code></div>`;
+  });
+
+  box.innerHTML = html
+    + `<table><thead><tr>`
+    + `<th>R (${u.len})</th><th>T</th><th>L</th><th>LC</th><th>M</th><th>E</th><th>D&deg;</th>`
+    + `</tr></thead><tbody>${rows}</tbody></table>`
+    + `<p class="note">T&nbsp;tangent distance &middot; L&nbsp;length of curve &middot; `
+    + `LC&nbsp;long chord &middot; M&nbsp;middle ordinate &middot; E&nbsp;external distance &middot; `
+    + `D&nbsp;degree of curve (arc def.)${units === "us" ? "" : ", n/a in metric"}. `
+    + `Lengths in ${u.len}.</p>`
+    + `<div class="status">${pcpt}</div>`;
+}
+
+/* ------------------------------------------------------------------ *
+ *  GeoJSON import / export
+ * ------------------------------------------------------------------ */
+const CONFIG_KEY = "fastest_path";
+
+// Snapshot of everything the user can configure (radii + style + calc settings).
+function getConfig() {
+  return {
+    version: 1,
+    units: document.getElementById("units").value,
+    method: document.getElementById("method").value,
+    showArcs: document.getElementById("showArcs").checked,
+    showVehiclePath: document.getElementById("showVehiclePath").checked,
+    vehicleOffset: parseFloat(document.getElementById("vehicleOffset").value) || 3,
+    radii: state.radii.map((r) => ({ value: r.value, color: r.color, visible: r.visible })),
+  };
+}
+
+// Restore a config snapshot produced by getConfig().
+function applyConfig(cfg) {
+  if (!cfg || typeof cfg !== "object") return;
+  const setSel = (id, val, allowed) => {
+    if (val != null && allowed.includes(val)) document.getElementById(id).value = val;
+  };
+  setSel("units", cfg.units, ["us", "si"]);
+  setSel("method", cfg.method, ["auto", "regression", "point-mass"]);
+  if (typeof cfg.showArcs === "boolean") document.getElementById("showArcs").checked = cfg.showArcs;
+  if (typeof cfg.showVehiclePath === "boolean")
+    document.getElementById("showVehiclePath").checked = cfg.showVehiclePath;
+  if (cfg.vehicleOffset > 0) document.getElementById("vehicleOffset").value = String(cfg.vehicleOffset);
+  document.getElementById("offsetUnit").textContent =
+    document.getElementById("units").value === "us" ? "ft each side of the path" : "m each side of the path";
+
+  if (Array.isArray(cfg.radii)) {
+    state.radii = cfg.radii
+      .filter((r) => r && r.value > 0)
+      .map((r) => ({
+        id: ++radiusSeq,
+        value: +r.value,
+        color: /^#[0-9a-fA-F]{6}$/.test(r.color || "") ? r.color : pickColor(),
+        visible: r.visible !== false,
+      }))
+      .sort((a, b) => a.value - b.value);
+  }
+  renderChips();
+}
+
+function pathsToGeoJSON() {
+  const feat = (coords, role) => ({
+    type: "Feature",
+    properties: { role },
+    geometry: { type: "LineString", coordinates: coords.map((ll) => [ll.lng, ll.lat]) },
+  });
+  const features = [];
+  if (state.entering.length === 2) features.push(feat(state.entering, "entering"));
+  if (state.exiting.length === 2) features.push(feat(state.exiting, "exiting"));
+  // config travels as a foreign member (RFC 7946 permits foreign members);
+  // import also accepts it under properties.fastest_path.
+  return { type: "FeatureCollection", [CONFIG_KEY]: getConfig(), features };
+}
+
+function loadGeoJSON(obj) {
+  const msg = document.getElementById("geojsonMsg");
+  try {
+    // 1. restore saved radii / settings first (never fatal)
+    const cfg = obj[CONFIG_KEY] || (obj.properties && obj.properties[CONFIG_KEY]);
+    let restored = "";
+    if (cfg) { applyConfig(cfg); restored = " + saved radii/settings"; }
+
+    // 2. restore the two LineStrings
+    let feats = [];
+    if (obj.type === "FeatureCollection") feats = obj.features || [];
+    else if (obj.type === "Feature") feats = [obj];
+    else if (obj.type === "LineString") feats = [{ type: "Feature", properties: {}, geometry: obj }];
+    const lines = feats.filter((f) => f.geometry && f.geometry.type === "LineString");
+
+    if (lines.length < 2) {
+      render();
+      if (cfg) { msg.textContent = "Loaded saved radii/settings (no paths in file)."; msg.className = "note"; }
+      else throw new Error("need two LineString features");
+      return;
+    }
+
+    const roleOf = (f) => (f.properties && (f.properties.role || f.properties.path || f.properties.movement) || "").toLowerCase();
+    let enter = lines.find((f) => ["entering", "in", "enter", "approach"].includes(roleOf(f)));
+    let exit = lines.find((f) => ["exiting", "out", "exit", "departure"].includes(roleOf(f)));
+    if (!enter || !exit) { enter = lines[0]; exit = lines[1]; }
+
+    const toLL = (f) => f.geometry.coordinates.slice(0, 2).map((c) => L.latLng(c[1], c[0]));
+    state.entering = toLL(enter);
+    state.exiting = toLL(exit);
+    if (state.entering.length < 2 || state.exiting.length < 2) throw new Error("each line needs 2 points");
+
+    map.fitBounds(L.latLngBounds([...state.entering, ...state.exiting]).pad(0.6));
+    msg.textContent = "Loaded 2 paths" + restored + ".";
+    msg.className = "note";
+    render();
+  } catch (e) {
+    msg.textContent = "Could not load: " + e.message;
+    msg.className = "note err";
+  }
+}
+
+document.getElementById("loadGeojson").onclick = () => {
+  const txt = document.getElementById("geojsonText").value.trim();
+  if (!txt) return;
+  try { loadGeoJSON(JSON.parse(txt)); }
+  catch (e) {
+    const msg = document.getElementById("geojsonMsg");
+    msg.textContent = "Invalid JSON: " + e.message; msg.className = "note err";
+  }
+};
+document.getElementById("fileInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById("geojsonText").value = reader.result;
+    try { loadGeoJSON(JSON.parse(reader.result)); }
+    catch (err) {
+      const msg = document.getElementById("geojsonMsg");
+      msg.textContent = "Invalid JSON: " + err.message; msg.className = "note err";
+    }
+  };
+  reader.readAsText(file);
+});
+document.getElementById("exportGeojson").onclick = () => {
+  const fc = pathsToGeoJSON();
+  const gj = JSON.stringify(fc, null, 2);
+  document.getElementById("geojsonText").value = gj;
+  const msg = document.getElementById("geojsonMsg");
+  msg.className = "note";
+  const what = fc.features.length
+    ? `${fc.features.length} path(s) + ${fc[CONFIG_KEY].radii.length} radii + settings`
+    : `${fc[CONFIG_KEY].radii.length} radii + settings (no paths drawn yet)`;
+  try {
+    const blob = new Blob([gj], { type: "application/geo+json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "turn-paths.geojson";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    msg.textContent = `Exported turn-paths.geojson — ${what} (also shown in the box).`;
+  } catch (e) {
+    msg.textContent = "Copy the GeoJSON from the box above.";
+  }
+};
+
+/* ---------- boot ---------- */
+refreshButtons();
+renderChips();
+render();
+</script>
+</body>
+</html>

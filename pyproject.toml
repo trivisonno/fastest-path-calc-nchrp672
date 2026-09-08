@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastest-path-calc-nchrp672"
+version = "1.0.0"
+description = "Roundabout fastest-path speed prediction and speed-consistency checks (NCHRP 672 / NCHRP 1043)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["roundabout", "nchrp-672", "nchrp-1043", "fastest-path", "traffic-engineering", "geometric-design"]
+
+[project.scripts]
+fastest-path = "fastestpath.cli:main"
+
+[tool.setuptools]
+packages = ["fastestpath"]
